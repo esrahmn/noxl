@@ -3,12 +3,16 @@ use std::error::Error;
 use wayland_client::{
     Connection, Dispatch, EventQueue, QueueHandle, delegate_noop,
     protocol::{
-        wl_callback,
+        wl_compositor::WlCompositor,
         wl_registry::{self, WlRegistry},
+        wl_surface::WlSurface,
     },
 };
 
-use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+use wayland_protocols_wlr::layer_shell::v1::client::{
+    zwlr_layer_shell_v1::{self, ZwlrLayerShellV1},
+    zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
+};
 
 #[derive(Debug)]
 pub struct WaylandGlobal {
@@ -34,7 +38,11 @@ impl WaylandGlobal {
 #[derive(Default)]
 struct WaylandState {
     globals: Vec<WaylandGlobal>,
+    compositor: Option<WlCompositor>,
     layer_shell: Option<ZwlrLayerShellV1>,
+    surface: Option<WlSurface>,
+    layer_surface: Option<ZwlrLayerSurfaceV1>,
+    configured_size: Option<(u32, u32)>,
 }
 
 impl Dispatch<WlRegistry, ()> for WaylandState {
@@ -54,13 +62,20 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
             } => {
                 println!("Global: {interface} (version {version}, name {name})");
 
-                if interface == "zwlr_layer_shell_v1" {
-                    let layer_shell =
-                        registry.bind::<ZwlrLayerShellV1, _, _>(name, version.min(5), qh, ());
+                match interface.as_str() {
+                    "wl_compositor" => {
+                        state.compositor = Some(registry.bind(name, version.min(6), qh, ()));
 
-                    state.layer_shell = Some(layer_shell);
+                        println!("NOXL: Compositor bound!");
+                    }
 
-                    println!("NOXL: Layer Shell bound successfully!");
+                    "zwlr_layer_shell_v1" => {
+                        state.layer_shell = Some(registry.bind(name, version.min(5), qh, ()));
+
+                        println!("NOXL: Layer Shell bound!");
+                    }
+
+                    _ => {}
                 }
 
                 state.globals.push(WaylandGlobal {
@@ -79,12 +94,44 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
     }
 }
 
-delegate_noop!(WaylandState: ignore wl_callback::WlCallback);
+impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
+    fn event(
+        state: &mut Self,
+        proxy: &ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _data: &(),
+        _connection: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height,
+            } => {
+                proxy.ack_configure(serial);
+
+                state.configured_size = Some((width, height));
+
+                println!("NOXL: Layer Surface configured: {width}x{height}");
+            }
+
+            zwlr_layer_surface_v1::Event::Closed => {
+                println!("NOXL: Layer Surface closed by compositor");
+            }
+
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(WaylandState: ignore WlCompositor);
 delegate_noop!(WaylandState: ignore ZwlrLayerShellV1);
+delegate_noop!(WaylandState: ignore WlSurface);
 
 /// Maintains a connection to the Wayland compositor.
 pub struct WaylandConnection {
-    connection: Connection,
+    _connection: Connection,
     event_queue: EventQueue<WaylandState>,
     state: WaylandState,
 }
@@ -95,10 +142,10 @@ impl WaylandConnection {
         let connection = Connection::connect_to_env()?;
 
         let mut event_queue = connection.new_event_queue();
-        let queue_handle = event_queue.handle();
+        let qh = event_queue.handle();
 
         let display = connection.display();
-        display.get_registry(&queue_handle, ());
+        display.get_registry(&qh, ());
 
         let mut state = WaylandState::default();
 
@@ -107,7 +154,7 @@ impl WaylandConnection {
         println!("\nNOXL discovered {} Wayland globals.", state.globals.len());
 
         Ok(Self {
-            connection,
+            _connection: connection,
             event_queue,
             state,
         })
@@ -131,13 +178,57 @@ impl WaylandConnection {
         self.state.layer_shell.is_some()
     }
 
-    /// Returns the Wayland connection.
-    pub fn connection(&self) -> &Connection {
-        &self.connection
-    }
+    /// Creates and configures a top layer surface.
+    pub fn create_layer_surface(&mut self) -> Result<(u32, u32), Box<dyn Error>> {
+        let qh = self.event_queue.handle();
 
-    /// Processes pending Wayland events.
-    pub fn dispatch_pending(&mut self) -> Result<usize, Box<dyn Error>> {
-        Ok(self.event_queue.dispatch_pending(&mut self.state)?)
+        let compositor = self
+            .state
+            .compositor
+            .as_ref()
+            .ok_or("Wayland compositor is unavailable")?;
+
+        let layer_shell = self
+            .state
+            .layer_shell
+            .as_ref()
+            .ok_or("Wayland Layer Shell is unavailable")?;
+
+        let surface = compositor.create_surface(&qh, ());
+
+        let layer_surface = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "noxl".to_string(),
+            &qh,
+            (),
+        );
+
+        layer_surface.set_size(800, 48);
+
+        layer_surface.set_anchor(
+            zwlr_layer_surface_v1::Anchor::Top
+                | zwlr_layer_surface_v1::Anchor::Left
+                | zwlr_layer_surface_v1::Anchor::Right,
+        );
+
+        layer_surface.set_exclusive_zone(48);
+
+        layer_surface
+            .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+
+        // Initial commit without a buffer requests a configure event.
+        surface.commit();
+
+        self.state.surface = Some(surface);
+        self.state.layer_surface = Some(layer_surface);
+
+        // Wait for the compositor to configure the surface.
+        self.event_queue.roundtrip(&mut self.state)?;
+
+        self.state
+            .configured_size
+            .ok_or_else(|| "Compositor did not configure the layer surface".into())
     }
 }

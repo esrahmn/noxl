@@ -1,26 +1,22 @@
 use noxl_wayland::WaylandConnection;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let connection = WaylandConnection::connect()?;
+    println!("Connecting to Wayland...");
 
-    println!("\n=== NOXL Wayland Registry ===");
+    let mut connection = WaylandConnection::connect()?;
 
-    for global in connection.globals() {
-        println!(
-            "{} | version {} | name {}",
-            global.interface(),
-            global.version(),
-            global.name()
-        );
-    }
-
-    println!("\n=== Protocol Availability ===");
+    println!("\n=== NOXL Protocol Availability ===");
 
     println!("Compositor: {}", connection.has_global("wl_compositor"));
 
     println!("Layer Shell: {}", connection.has_layer_shell());
 
-    println!("Output: {}", connection.has_global("wl_output"));
+    println!("\n=== Creating Layer Surface ===");
+
+    let (width, height) = connection.create_layer_surface()?;
+
+    println!("\nNOXL Layer Surface created!");
+    println!("Configured size: {width}x{height}");
 
     Ok(())
 }
