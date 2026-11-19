@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/noxl-core",
+    "crates/noxl-renderer",
+    "crates/noxl-wayland",
+    "crates/noxl-layout",
+    "crates/noxl-reactive",
+    "crates/noxl-animation",
+    "crates/noxl-widgets",
+    "crates/noxl-platform",
+    "crates/noxl-runtime",
+    "crates/noxl-scripting",
+    "crates/noxl-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"

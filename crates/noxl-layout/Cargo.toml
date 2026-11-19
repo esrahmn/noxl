@@ -1,0 +1,8 @@
+[package]
+name = "noxl-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+noxl-core = { path = "../noxl-core" }
