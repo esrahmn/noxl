@@ -1,10 +1,9 @@
-
 use wayland_client::{
+    Connection, Dispatch, QueueHandle, delegate_noop,
     protocol::{
         wl_callback,
         wl_registry::{self, WlRegistry},
     },
-    Connection, Dispatch, QueueHandle, delegate_noop,
 };
 
 #[derive(Default)]
@@ -13,10 +12,24 @@ struct WaylandState {
 }
 
 #[derive(Debug)]
-struct WaylandGlobal {
+pub struct WaylandGlobal {
     name: u32,
     interface: String,
     version: u32,
+}
+
+impl WaylandGlobal {
+    pub fn name(&self) -> u32 {
+        self.name
+    }
+
+    pub fn interface(&self) -> &str {
+        &self.interface
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
 }
 
 impl Dispatch<WlRegistry, ()> for WaylandState {
@@ -48,7 +61,7 @@ impl Dispatch<WlRegistry, ()> for WaylandState {
 delegate_noop!(WaylandState: ignore wl_callback::WlCallback);
 
 /// Connects to the current Wayland compositor and discovers its globals.
-pub fn discover_globals() -> Result<(), Box<dyn std::error::Error>> {
+pub fn discover_globals() -> Result<Vec<WaylandGlobal>, Box<dyn std::error::Error>> {
     let connection = Connection::connect_to_env()?;
 
     let mut event_queue = connection.new_event_queue();
@@ -63,5 +76,5 @@ pub fn discover_globals() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nDiscovered {} Wayland globals.", state.globals.len());
 
-    Ok(())
+    Ok(state.globals)
 }
