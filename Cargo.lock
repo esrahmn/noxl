@@ -434,6 +434,7 @@ name = "noxl-wayland"
 version = "0.1.0"
 dependencies = [
  "memmap2",
+ "noxl-renderer",
  "tempfile",
  "wayland-client",
  "wayland-protocols-wlr",

@@ -303,6 +303,53 @@ impl WaylandConnection {
         Ok((width, height))
     }
 
+    /// Copies RGBA pixels into the SHM buffer and presents the frame.
+    pub fn present_rgba(&mut self, rgba: &[u8]) -> Result<(), Box<dyn Error>> {
+        let (width, height) = self
+            .state
+            .configured_size
+            .ok_or("Surface has not been configured")?;
+
+        let expected_size = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|size| size.checked_mul(4))
+            .ok_or("Pixel buffer size overflow")?;
+
+        if rgba.len() != expected_size {
+            return Err(format!(
+                "Invalid pixel buffer size: expected {expected_size}, got {}",
+                rgba.len()
+            )
+            .into());
+        }
+
+        let buffer = self
+            .state
+            .buffer
+            .as_mut()
+            .ok_or("SHM buffer is unavailable")?;
+
+        // Wayland ARGB8888 on little-endian machines uses BGRA byte order.
+        for (dst, src) in buffer
+            ._mapping
+            .chunks_exact_mut(4)
+            .zip(rgba.chunks_exact(4))
+        {
+            dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+        }
+
+        let surface = self
+            .state
+            .surface
+            .as_ref()
+            .ok_or("Surface is unavailable")?;
+
+        surface.damage(0, 0, width as i32, height as i32);
+        surface.commit();
+
+        Ok(())
+    }
+
     /// Keep the surface alive until the compositor closes it.
     pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
         println!("NOXL: event loop running. Press Ctrl+C to exit.");
