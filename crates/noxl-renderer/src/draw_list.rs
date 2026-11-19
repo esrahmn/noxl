@@ -396,7 +396,9 @@ mod tests {
         let second = rect(20.0, 20.0, 50.0, 50.0);
 
         list.with_clip(first, |list| list.push(primitive(10.0)));
-        list.with_clip(second, |list| list.push(primitive(30.0)));
+        list.with_clip(second, |list| {
+            list.push(primitive_at(30.0, 30.0, 10.0, 10.0))
+        });
 
         assert_eq!(
             list.commands(),
