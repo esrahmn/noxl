@@ -205,7 +205,7 @@ impl WaylandConnection {
             (),
         );
 
-        layer_surface.set_size(800, 48);
+        layer_surface.set_size(0, 48);
 
         layer_surface.set_anchor(
             zwlr_layer_surface_v1::Anchor::Top
